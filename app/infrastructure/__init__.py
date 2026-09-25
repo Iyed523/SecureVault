@@ -1,0 +1,1 @@
+"""Connexions aux services externes."""

@@ -10,6 +10,30 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: ci
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://securevault:ci_dev_only@127.0.0.1:5432/securevault
+      REDIS_URL: redis://127.0.0.1:6379/0
+    services:
+      postgres:
+        image: postgres:17@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+        env:
+          POSTGRES_USER: securevault
+          POSTGRES_PASSWORD: ci_dev_only
+          POSTGRES_DB: securevault
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U securevault -d securevault"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:8@sha256:718f745deb7dfefeac6eed7041fc7ec9476b50e61b247932682457c41adafa0e
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -18,10 +42,14 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -c constraints-runtime.txt -e ".[dev]"
+      - name: Dependency consistency
+        run: python -m pip check
       - name: Lint
         run: python -m ruff check .
       - name: Formatting
         run: python -m ruff format --check .
       - name: Tests
         run: python -m pytest
+      - name: Alembic configuration
+        run: python -m alembic current

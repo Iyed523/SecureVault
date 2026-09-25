@@ -12,6 +12,10 @@ dependencies = [
     "fastapi==0.141.1",
     "uvicorn==0.54.0",
     "pydantic-settings==2.15.0",
+    "SQLAlchemy[asyncio]==2.1.0",
+    "asyncpg==0.31.0",
+    "alembic==1.20.0",
+    "redis==8.1.0",
 ]
 
 [project.optional-dependencies]
@@ -30,3 +34,4 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = ["integration: nécessite PostgreSQL 17 et Redis 8 réels"]

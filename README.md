@@ -1,58 +1,122 @@
 # SecureVault
 
-Socle d'une API REST FastAPI. **Projet en développement.**
-Seul `GET /health` est implémenté : HTTP 200 et `{"status":"ok"}`.
+API REST FastAPI, **en développement**. Le socle inclut PostgreSQL 17,
+SQLAlchemy async, Alembic, Redis 8 et les sondes de disponibilité.
 
 ## Prérequis
 
-CPython 3.13.x standard 64 bits, avec `pip` et `venv`, et Git.
+- CPython 3.13.x standard 64 bits, `pip`, `venv` et Git.
+- Docker avec moteur Linux actif et Docker Compose v2.
+- Ports locaux 8000, 5432 et 6379 disponibles.
 
-## Installation locale
+## Installation et configuration locale
 
-Depuis la racine du projet, dans PowerShell, créer l'environnement uniquement
-s'il n'existe pas encore (remplacer `python` par le chemin de CPython au besoin) :
-
-```powershell
-python -m venv .venv
-```
-
-Activer l'environnement existant et installer les dépendances :
+Depuis la racine, utiliser `.venv` existant. Sur une nouvelle installation
+uniquement : `python -m venv .venv` avec CPython 3.13.
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+python -m pip install -c constraints-runtime.txt -e ".[dev]"
 ```
 
-Sous Linux/macOS : `python3.13 -m venv .venv`, puis `source .venv/bin/activate`
-et la même commande d'installation.
+Sous Linux/macOS : `python3.13 -m venv .venv`, puis `source .venv/bin/activate`.
 
-La configuration lit les variables d'environnement et, s'il existe, `.env`
-dans le répertoire courant. Les variables d'environnement sont prioritaires.
-Les valeurs de développement sont illustrées dans `.env.example` ; aucune copie
-n'est nécessaire pour démarrer. `DEBUG` est désactivé par défaut et `LOG_LEVEL`
-accepte `DEBUG`, `INFO`, `WARNING`, `ERROR` ou `CRITICAL`.
+`DATABASE_URL` et `REDIS_URL` sont obligatoires. Avant de démarrer l'API, Alembic
+ou Pytest localement, fournir ces variables dans l'environnement ou copier
+`.env.example` vers `.env` (valeurs fictives de développement). Ne pas écraser un
+`.env` existant. Les variables d'environnement sont prioritaires sur `.env`,
+lu depuis le répertoire courant. `DEBUG=false` par défaut ; `LOG_LEVEL` accepte
+`DEBUG`, `INFO`, `WARNING`, `ERROR` ou `CRITICAL`.
 
-## Lancement local
+`DATABASE_URL` utilise `postgresql+asyncpg://` ; `REDIS_URL` utilise `redis://`
+ou `rediss://`. Les URLs de `.env.example` ciblent l'hôte. Compose fournit
+explicitement ses propres URLs utilisant les noms `postgres` et `redis` ;
+le `.env` de l'hôte n'est pas injecté dans l'API conteneurisée.
 
-Depuis la racine, environnement activé :
+Les identifiants `securevault` / `local_dev_only` sont fictifs et réservés à
+ce Compose de développement. Redis local n'a pas d'authentification ; les ports
+publiés sont limités à `127.0.0.1`. Ne pas utiliser cette configuration en production.
+
+## Docker Compose
 
 ```powershell
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --no-access-log
+ docker compose up -d --build --wait
+ docker compose ps
 ```
 
-Endpoint : <http://127.0.0.1:8000/health>.
-`LOG_LEVEL` règle les logs applicatifs ; Uvicorn possède son propre réglage
-`--log-level`. Les logs d'accès sont désactivés dans cette commande.
-
-## Tests
+Services : API non-root sur le port 8000, PostgreSQL sur 5432, Redis sur 6379.
+Compose attend les healthchecks PostgreSQL/Redis avant de lancer l'API.
+PostgreSQL conserve ses données dans le volume nommé `postgres_data` du projet ;
+Redis est éphémère. Les images sont fixées par digest et les versions runtime
+par `constraints-runtime.txt`. Toute mise à jour doit revalider ces contraintes
+avec `pip check`, les tests et une reconstruction Docker.
 
 ```powershell
-python -m pytest
+ docker compose down
 ```
 
-## Ruff
+Cette commande préserve le volume PostgreSQL. Ne pas ajouter `--volumes` pour
+un arrêt normal.
+
+## API locale hors conteneur
+
+Lancer seulement l'infrastructure, puis l'API avec `.venv` activé :
 
 ```powershell
-python -m ruff check .
-python -m ruff format --check .
+ docker compose up -d --wait postgres redis
+ python -m uvicorn app.main:app --reload --host 127.0.0.1 --no-access-log
 ```
+
+Arrêter auparavant l'API Compose si elle occupe le port 8000 :
+`docker compose stop api`.
+`LOG_LEVEL` contrôle le logging applicatif ; Uvicorn utilise `--log-level`.
+
+- `GET /health` : liveness, HTTP 200 avec `{"status":"ok"}`, même si les services
+  sont indisponibles. Le démarrage ne nécessite pas de connexion aux services.
+- `GET /ready` : `SELECT 1` PostgreSQL et `PING` Redis, contrôlés en parallèle
+  avec une limite de trois secondes par service. HTTP 200 avec
+  `{"status":"ready","services":{"database":"ok","redis":"ok"}}`.
+  En cas d'échec : HTTP 503, `status=not_ready`, service concerné à `unavailable`,
+  sans URL, credential ou détail d'exception.
+
+## Alembic
+
+Depuis l'hôte, PostgreSQL démarré et `.venv` activé :
+
+```powershell
+ python -m alembic current
+ python -m alembic upgrade head
+```
+
+Ou dans l'API démarrée : `docker compose exec api python -m alembic current`.
+Alembic lit la configuration centralisée et `Base.metadata` via une connexion
+async. Il n'existe encore aucune révision métier : `current` n'affiche donc
+aucun identifiant. Aucune table métier n'est créée au démarrage de l'API.
+
+## Tests et lint
+
+Tests rapides sans Docker :
+
+```powershell
+ python -m pytest -m "not integration"
+```
+
+Tests d'intégration (PostgreSQL et Redis réels, sans mocks ni SQLite) :
+
+```powershell
+ docker compose up -d --wait postgres redis
+ python -m pytest -m integration
+```
+
+Toute la suite, avec l'infrastructure démarrée :
+
+```powershell
+ python -m pip check
+ python -m ruff check .
+ python -m ruff format --check .
+ python -m pytest
+```
+
+Les tests d'intégration échouent si les services sont absents ; ils ne sont pas
+silencieusement ignorés. La CI fournit PostgreSQL/Redis par services GitHub
+Actions et exécute toute la suite avec des URLs explicites.
