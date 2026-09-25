@@ -73,6 +73,11 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
 
 - `GET /health` : liveness, HTTP 200 avec `{"status":"ok"}`, même si les services
   sont indisponibles. Le démarrage ne nécessite pas de connexion aux services.
+- `POST /auth/register` : inscription avec `email` et `password`. Email validé
+  sans DNS puis canonicalisé ; mot de passe de 15 à 128 caractères, conservé
+  sans transformation et stocké sous forme Argon2id. Réponse 201 contenant
+  uniquement `id`, `email`, `is_active`, `created_at`. Doublon : 409 ; entrée
+  invalide : 422 sans restitution des valeurs soumises.
 - `GET /ready` : `SELECT 1` PostgreSQL et `PING` Redis, contrôlés en parallèle
   avec une limite de trois secondes par service. HTTP 200 avec
   `{"status":"ready","services":{"database":"ok","redis":"ok"}}`.
@@ -129,4 +134,4 @@ Les tests de persistance utilisent une transaction externe rollbackée par test
 et une session jointe via savepoint. Ils ne font pas de nettoyage global des
 tables ; utiliser néanmoins une base PostgreSQL de test dédiée dans `DATABASE_URL`.
 Les repositories ne valident pas les transactions : leurs méthodes `add` font
-un `flush`, et le futur service sera responsable du `commit`.
+un `flush`, et le service d'inscription contrôle le `commit` et le rollback.
