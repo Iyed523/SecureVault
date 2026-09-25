@@ -1,0 +1,1 @@
+"""Primitives de sécurité applicative."""
