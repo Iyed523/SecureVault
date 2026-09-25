@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app import models  # noqa: F401 -- enregistre les tables dans Base.metadata
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.db.base import Base
