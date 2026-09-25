@@ -90,8 +90,11 @@ Depuis l'hôte, PostgreSQL démarré et `.venv` activé :
 
 Ou dans l'API démarrée : `docker compose exec api python -m alembic current`.
 Alembic lit la configuration centralisée et `Base.metadata` via une connexion
-async. Il n'existe encore aucune révision métier : `current` n'affiche donc
-aucun identifiant. Aucune table métier n'est créée au démarrage de l'API.
+async. La révision `296081feebfa` crée `users`, `sessions` et `refresh_tokens`
+avec leurs contraintes et indexes. `python -m alembic check` vérifie la cohérence
+avec les modèles. Aucune table n'est créée au démarrage de l'API ; exécuter
+`upgrade head` avant les tests d'intégration. L'authentification n'est pas encore
+implémentée.
 
 ## Tests et lint
 
@@ -105,6 +108,7 @@ Tests d'intégration (PostgreSQL et Redis réels, sans mocks ni SQLite) :
 
 ```powershell
  docker compose up -d --wait postgres redis
+ python -m alembic upgrade head
  python -m pytest -m integration
 ```
 
@@ -120,3 +124,9 @@ Toute la suite, avec l'infrastructure démarrée :
 Les tests d'intégration échouent si les services sont absents ; ils ne sont pas
 silencieusement ignorés. La CI fournit PostgreSQL/Redis par services GitHub
 Actions et exécute toute la suite avec des URLs explicites.
+
+Les tests de persistance utilisent une transaction externe rollbackée par test
+et une session jointe via savepoint. Ils ne font pas de nettoyage global des
+tables ; utiliser néanmoins une base PostgreSQL de test dédiée dans `DATABASE_URL`.
+Les repositories ne valident pas les transactions : leurs méthodes `add` font
+un `flush`, et le futur service sera responsable du `commit`.

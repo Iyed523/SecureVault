@@ -49,7 +49,11 @@ jobs:
         run: python -m ruff check .
       - name: Formatting
         run: python -m ruff format --check .
+      - name: Apply migrations
+        run: python -m alembic upgrade head
       - name: Tests
         run: python -m pytest
       - name: Alembic configuration
-        run: python -m alembic current
+        run: |
+          python -m alembic current
+          python -m alembic check
