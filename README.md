@@ -21,7 +21,7 @@ python -m pip install -c constraints-runtime.txt -e ".[dev]"
 
 Sous Linux/macOS : `python3.13 -m venv .venv`, puis `source .venv/bin/activate`.
 
-`DATABASE_URL` et `REDIS_URL` sont obligatoires. Avant de démarrer l'API, Alembic
+`DATABASE_URL`, `REDIS_URL` et `JWT_SECRET` sont obligatoires. Avant de démarrer l'API, Alembic
 ou Pytest localement, fournir ces variables dans l'environnement ou copier
 `.env.example` vers `.env` (valeurs fictives de développement). Ne pas écraser un
 `.env` existant. Les variables d'environnement sont prioritaires sur `.env`,
@@ -31,7 +31,23 @@ lu depuis le répertoire courant. `DEBUG=false` par défaut ; `LOG_LEVEL` accept
 `DATABASE_URL` utilise `postgresql+asyncpg://` ; `REDIS_URL` utilise `redis://`
 ou `rediss://`. Les URLs de `.env.example` ciblent l'hôte. Compose fournit
 explicitement ses propres URLs utilisant les noms `postgres` et `redis` ;
-le `.env` de l'hôte n'est pas injecté dans l'API conteneurisée.
+seul `JWT_SECRET` est repris explicitement de l'environnement ou du `.env`
+local pour l'API conteneurisée.
+
+Générer une clé JWT locale avec une source cryptographique :
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Placer cette valeur dans `JWT_SECRET` de votre `.env` local non versionné ou
+dans l'environnement. Les 64 caractères hexadécimaux représentent 32 octets.
+Le placeholder vide de `.env.example` est volontairement invalide. Ne jamais
+publier cette valeur. Compose refuse une variable absente ou vide, même pour
+les commandes ciblant seulement PostgreSQL/Redis. Les tests utilisent une clé
+fictive publique distincte, définie dans leur configuration et dans la CI.
+Les valeurs par défaut sont `ACCESS_TOKEN_TTL_MINUTES=15`, `SESSION_TTL_DAYS=30`,
+`JWT_ISSUER=securevault`, `JWT_AUDIENCE=securevault-api`. HS256 est fixé en code.
 
 Les identifiants `securevault` / `local_dev_only` sont fictifs et réservés à
 ce Compose de développement. Redis local n'a pas d'authentification ; les ports
@@ -78,6 +94,14 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
   sans transformation et stocké sous forme Argon2id. Réponse 201 contenant
   uniquement `id`, `email`, `is_active`, `created_at`. Doublon : 409 ; entrée
   invalide : 422 sans restitution des valeurs soumises.
+- `POST /auth/login` : body JSON `email`/`password`. Réponse 200 contenant
+  `access_token`, `token_type="bearer"`, `expires_in=900` par défaut. Un login
+  réussi crée une Session de 30 jours. Credentials incorrects ou compte inactif :
+  401 avec `{"detail":"Invalid credentials."}` et `WWW-Authenticate: Bearer`.
+- `GET /users/me` : Bearer obligatoire, réponse 200 avec `id`, `email`,
+  `is_active`, `created_at`. Le token et la Session PostgreSQL sont vérifiés à
+  chaque appel ; révocation, expiration ou compte désactivé entraînent un 401.
+  Aucune écriture de `last_used_at` n'est effectuée.
 - `GET /ready` : `SELECT 1` PostgreSQL et `PING` Redis, contrôlés en parallèle
   avec une limite de trois secondes par service. HTTP 200 avec
   `{"status":"ready","services":{"database":"ok","redis":"ok"}}`.
@@ -98,8 +122,14 @@ Alembic lit la configuration centralisée et `Base.metadata` via une connexion
 async. La révision `296081feebfa` crée `users`, `sessions` et `refresh_tokens`
 avec leurs contraintes et indexes. `python -m alembic check` vérifie la cohérence
 avec les modèles. Aucune table n'est créée au démarrage de l'API ; exécuter
-`upgrade head` avant les tests d'intégration. L'authentification n'est pas encore
-implémentée.
+`upgrade head` avant les tests d'intégration.
+
+Exemple de header pour `/users/me` (remplacer le placeholder localement) :
+
+```http
+GET /users/me
+Authorization: Bearer <access_token_obtenu_localement>
+```
 
 ## Tests et lint
 
@@ -134,4 +164,4 @@ Les tests de persistance utilisent une transaction externe rollbackée par test
 et une session jointe via savepoint. Ils ne font pas de nettoyage global des
 tables ; utiliser néanmoins une base PostgreSQL de test dédiée dans `DATABASE_URL`.
 Les repositories ne valident pas les transactions : leurs méthodes `add` font
-un `flush`, et le service d'inscription contrôle le `commit` et le rollback.
+un `flush`, et les services d'inscription/login contrôlent commit et rollback.
