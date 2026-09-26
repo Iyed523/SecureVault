@@ -95,9 +95,19 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
   uniquement `id`, `email`, `is_active`, `created_at`. Doublon : 409 ; entrée
   invalide : 422 sans restitution des valeurs soumises.
 - `POST /auth/login` : body JSON `email`/`password`. Réponse 200 contenant
-  `access_token`, `token_type="bearer"`, `expires_in=900` par défaut. Un login
-  réussi crée une Session de 30 jours. Credentials incorrects ou compte inactif :
+  `access_token`, `refresh_token`, `token_type="bearer"`, `expires_in=900` par défaut.
+  Un login réussi crée une Session de 30 jours et un refresh token opaque.
+  Credentials incorrects ou compte inactif :
   401 avec `{"detail":"Invalid credentials."}` et `WWW-Authenticate: Bearer`.
+- `POST /auth/refresh` : body JSON `refresh_token`, sans access token requis.
+  Réponse 200 avec les mêmes quatre champs que le login. Le refresh token est
+  à usage unique : chaque rotation le consomme et fournit un remplacement.
+  Leur expiration absolue reste celle de la Session, sans prolongation.
+  Réutiliser un token consommé révoque toute la Session, ses refresh tokens
+  et l'accès via ses JWT. Tout refus retourne 401 `Invalid refresh token.`.
+- `POST /auth/logout` : body JSON `refresh_token`, sans access token requis.
+  Révoque la Session et sa famille de refresh tokens, y compris avec un ancien
+  token consommé. Idempotent : 204 sans body, également pour un token inconnu.
 - `GET /users/me` : Bearer obligatoire, réponse 200 avec `id`, `email`,
   `is_active`, `created_at`. Le token et la Session PostgreSQL sont vérifiés à
   chaque appel ; révocation, expiration ou compte désactivé entraînent un 401.
@@ -164,4 +174,6 @@ Les tests de persistance utilisent une transaction externe rollbackée par test
 et une session jointe via savepoint. Ils ne font pas de nettoyage global des
 tables ; utiliser néanmoins une base PostgreSQL de test dédiée dans `DATABASE_URL`.
 Les repositories ne valident pas les transactions : leurs méthodes `add` font
-un `flush`, et les services d'inscription/login contrôlent commit et rollback.
+un `flush`, et les services contrôlent commit et rollback. Les tests de rotation
+utilisent aussi des commits réels et une autre connexion pour vérifier la
+persistance des révocations ; ils nettoient uniquement leurs propres utilisateurs.

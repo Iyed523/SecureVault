@@ -18,6 +18,14 @@ class SessionRepository:
     async def get_by_id(self, session_id: UUID) -> Session | None:
         return await self.session.get(Session, session_id)
 
+    async def get_by_id_for_update(self, session_id: UUID) -> Session | None:
+        return await self.session.scalar(
+            select(Session)
+            .where(Session.id == session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
     async def get_by_id_and_user_id(
         self, session_id: UUID, user_id: UUID
     ) -> Session | None:

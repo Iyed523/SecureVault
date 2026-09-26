@@ -2,7 +2,10 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-SENSITIVE_VALIDATION_FIELDS = frozenset({"password"})
+SENSITIVE_VALIDATION_MESSAGES = {
+    "password": "Invalid password.",
+    "refresh_token": "Invalid refresh token.",
+}
 
 
 async def validation_error_handler(
@@ -16,12 +19,13 @@ async def validation_error_handler(
                 {
                     "type": error["type"],
                     "loc": error["loc"],
-                    "msg": (
-                        "Invalid password."
-                        if any(
-                            part in SENSITIVE_VALIDATION_FIELDS for part in error["loc"]
-                        )
-                        else error["msg"]
+                    "msg": next(
+                        (
+                            SENSITIVE_VALIDATION_MESSAGES[part]
+                            for part in error["loc"]
+                            if part in SENSITIVE_VALIDATION_MESSAGES
+                        ),
+                        error["msg"],
                     ),
                 }
                 for error in exc.errors()

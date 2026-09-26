@@ -17,6 +17,7 @@ from app.main import create_app
 from app.models import RefreshToken, Session, User
 from app.schemas.auth import LoginRequest, RegistrationRequest
 from app.schemas.user import PublicUser
+from app.security.refresh_tokens import hash_refresh_token
 from app.security.tokens import create_access_token, decode_access_token
 from app.services import login
 from app.services.registration import register_user
@@ -82,11 +83,22 @@ async def test_login_success(
     assert (
         session.revoked_at is session.last_used_at is session.revocation_reason is None
     )
-    assert (
-        await db_session.scalar(
-            select(RefreshToken.id).where(RefreshToken.session_id == session.id)
+    tokens = (
+        await db_session.scalars(
+            select(RefreshToken).where(RefreshToken.session_id == session.id)
         )
-        is None
+    ).all()
+    assert len(tokens) == 1
+    refresh = tokens[0]
+    assert refresh.token_hash == hash_refresh_token(result.refresh_token)
+    assert len(refresh.token_hash) == 32
+    assert refresh.issued_at == session.created_at
+    assert refresh.expires_at == session.expires_at
+    assert refresh.consumed_at is refresh.revoked_at is refresh.replaced_by_id is None
+    assert all(
+        getattr(refresh, column.name)
+        not in (result.refresh_token, result.refresh_token.encode())
+        for column in RefreshToken.__table__.columns
     )
 
 
@@ -189,6 +201,12 @@ async def test_signing_failure_rolls_back_session(
     assert len(flushed_ids) == 1
     assert not db_session.in_transaction()
     assert (
+        await db_session.scalar(
+            select(RefreshToken.id).where(RefreshToken.session_id == flushed_ids[0])
+        )
+        is None
+    )
+    assert (
         await db_session.scalar(select(Session.id).where(Session.user_id == user.id))
         is None
     )
@@ -214,7 +232,7 @@ async def test_login_and_me_http(
     )
     assert result.status_code == 200
     body = result.json()
-    assert set(body) == {"access_token", "token_type", "expires_in"}
+    assert set(body) == {"access_token", "refresh_token", "token_type", "expires_in"}
     assert body["token_type"] == "bearer" and body["expires_in"] == 900
     me = await client.get(
         "/users/me",
@@ -229,6 +247,8 @@ async def test_login_and_me_http(
         assert stored.password_hash not in response.text
     assert PASSWORD not in caplog.text and stored.password_hash not in caplog.text
     assert body["access_token"] not in caplog.text
+    assert body["refresh_token"] not in caplog.text
+    assert hash_refresh_token(body["refresh_token"]).hex() not in caplog.text
     server_session = await db_session.scalar(
         select(Session).where(Session.user_id == user.id)
     )
