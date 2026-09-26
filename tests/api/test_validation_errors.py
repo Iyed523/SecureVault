@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from app.api.errors import validation_error_handler
 
 
-@pytest.mark.parametrize("field", ["password", "refresh_token"])
+@pytest.mark.parametrize("field", ["password", "refresh_token", "content"])
 @pytest.mark.parametrize(
     "location",
     [
@@ -44,7 +44,9 @@ def test_password_validation_message_is_redacted(
             {
                 "type": "value_error",
                 "loc": list(location),
-                "msg": f"Invalid {field.replace('_', ' ')}.",
+                "msg": "Invalid secret content."
+                if field == "content"
+                else f"Invalid {field.replace('_', ' ')}.",
             }
         ]
     }

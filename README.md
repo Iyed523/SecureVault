@@ -21,7 +21,7 @@ python -m pip install -c constraints-runtime.txt -e ".[dev]"
 
 Sous Linux/macOS : `python3.13 -m venv .venv`, puis `source .venv/bin/activate`.
 
-`DATABASE_URL`, `REDIS_URL` et `JWT_SECRET` sont obligatoires. Avant de démarrer l'API, Alembic
+`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET` et `SECRETS_ENCRYPTION_KEYS` sont obligatoires. Avant de démarrer l'API, Alembic
 ou Pytest localement, fournir ces variables dans l'environnement ou copier
 `.env.example` vers `.env` (valeurs fictives de développement). Ne pas écraser un
 `.env` existant. Les variables d'environnement sont prioritaires sur `.env`,
@@ -31,8 +31,8 @@ lu depuis le répertoire courant. `DEBUG=false` par défaut ; `LOG_LEVEL` accept
 `DATABASE_URL` utilise `postgresql+asyncpg://` ; `REDIS_URL` utilise `redis://`
 ou `rediss://`. Les URLs de `.env.example` ciblent l'hôte. Compose fournit
 explicitement ses propres URLs utilisant les noms `postgres` et `redis` ;
-seul `JWT_SECRET` est repris explicitement de l'environnement ou du `.env`
-local pour l'API conteneurisée.
+`JWT_SECRET`, `SECRETS_ENCRYPTION_KEYS` et `SECRETS_ACTIVE_KEY_VERSION` sont repris
+explicitement de l'environnement ou du `.env` local pour l'API conteneurisée.
 
 Générer une clé JWT locale avec une source cryptographique :
 
@@ -52,6 +52,24 @@ Les valeurs par défaut sont `ACCESS_TOKEN_TTL_MINUTES=15`, `SESSION_TTL_DAYS=30
 Les identifiants `securevault` / `local_dev_only` sont fictifs et réservés à
 ce Compose de développement. Redis local n'a pas d'authentification ; les ports
 publiés sont limités à `127.0.0.1`. Ne pas utiliser cette configuration en production.
+
+Générer séparément le keyring AES-256-GCM dans un terminal local privé :
+
+```powershell
+python -c "import json,secrets; print(json.dumps({'1': secrets.token_hex(32)}))"
+```
+
+Placer le JSON dans `SECRETS_ENCRYPTION_KEYS` (entouré de quotes simples dans
+`.env`). Ne jamais versionner ou journaliser cette valeur. Chaque clé comporte
+exactement 64 caractères hexadécimaux, soit 32 octets. Les versions sont des
+entiers positifs jusqu'à 2147483647, sans doublons. `SECRETS_ACTIVE_KEY_VERSION`
+vaut 1 par défaut et doit exister dans le keyring. Le placeholder vide est
+volontairement invalide ; Compose exige aussi le keyring pour ses commandes.
+Pour changer de clé, ajouter une nouvelle version avec une nouvelle clé et
+la rendre active ; conserver les anciennes clés pour lire les anciens secrets.
+Ne pas réassigner une version ni réutiliser une même clé sous plusieurs versions.
+Cette phase ne réchiffre pas les données existantes. Voir
+[ADR 0006](docs/adr/0006-encrypted-secrets.md) pour le format et ses limites.
 
 ## Docker Compose
 
@@ -117,6 +135,17 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
   `{"status":"ready","services":{"database":"ok","redis":"ok"}}`.
   En cas d'échec : HTTP 503, `status=not_ready`, service concerné à `unavailable`,
   sans URL, credential ou détail d'exception.
+- `POST /secrets` : Bearer obligatoire, JSON `title` et `content`, sans propriétaire
+  fourni par le client. Titre de 1 à 200 caractères, non exclusivement blanc ;
+  contenu de 1 à 65536 octets UTF-8. Aucune normalisation. Réponse 201 avec
+  `id`, `title`, `content`, `created_at`, `updated_at`.
+- `GET /secrets/{id}` : mêmes cinq champs pour le propriétaire authentifié.
+  Un identifiant absent ou appartenant à un tiers retourne le même 404
+  `Secret not found.` ; un contenu du propriétaire indéchiffrable retourne
+  500 `Secret content unavailable.`. Le contenu est chiffré en base avec
+  AES-256-GCM ; titre, propriétaire, identifiants, dates, versions et longueur
+  restent visibles. La réponse autorisée contient le contenu en clair : TLS
+  est nécessaire en déploiement. Aucune route de liste, modification ou suppression.
 
 ## Alembic
 
@@ -133,6 +162,10 @@ async. La révision `296081feebfa` crée `users`, `sessions` et `refresh_tokens`
 avec leurs contraintes et indexes. `python -m alembic check` vérifie la cohérence
 avec les modèles. Aucune table n'est créée au démarrage de l'API ; exécuter
 `upgrade head` avant les tests d'intégration.
+
+La révision `b1f2d6535a21`, descendante de `296081feebfa`, ajoute `secrets`,
+son index propriétaire, sa FK avec suppression en cascade et ses contraintes
+de longueur, de versions positives et d'unicité `(key_version, nonce)`.
 
 Exemple de header pour `/users/me` (remplacer le placeholder localement) :
 
