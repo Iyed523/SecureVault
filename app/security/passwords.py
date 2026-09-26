@@ -25,9 +25,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return False
     try:
-        validate_password(password)
-    except ValueError:
+        password.encode("utf-8")
+    except UnicodeEncodeError:
         return False
     try:
         return _password_hash.verify(password, password_hash)

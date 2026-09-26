@@ -15,8 +15,12 @@ class UserRepository:
         await self.session.flush()
         return user
 
-    async def get_by_id(self, user_id: UUID) -> User | None:
-        return await self.session.get(User, user_id)
+    async def get_by_id(
+        self, user_id: UUID, *, populate_existing: bool = False
+    ) -> User | None:
+        return await self.session.get(
+            User, user_id, populate_existing=populate_existing
+        )
 
     async def get_by_email(self, email: str) -> User | None:
         result = await self.session.execute(select(User).where(User.email == email))

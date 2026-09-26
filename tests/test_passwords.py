@@ -2,7 +2,9 @@ import pytest
 from argon2 import Type, extract_parameters
 from pwdlib.hashers.argon2 import Argon2Hasher
 
+from app.schemas.auth import LoginRequest
 from app.security import passwords
+from app.services.login import DUMMY_PASSWORD_HASH
 
 
 def test_argon2_hashes_and_verification() -> None:
@@ -56,3 +58,31 @@ def test_invalid_password_rejected_before_hashing(
 
 def test_unknown_hash_is_not_verified() -> None:
     assert not passwords.verify_password("x" * 15, "not-a-password-hash")
+
+
+def test_dummy_hash_parameters() -> None:
+    params = extract_parameters(DUMMY_PASSWORD_HASH)
+    assert params.type is Type.ID
+    assert (params.memory_cost, params.time_cost, params.parallelism) == (65536, 3, 1)
+
+
+@pytest.mark.parametrize("password", ["", "short", " x "])
+def test_login_verifies_password_below_creation_minimum(password: str) -> None:
+    request = LoginRequest(email="User@Example.com", password=password)
+    assert request.email == "user@example.com"
+    assert request.password.get_secret_value() == password
+    legacy = Argon2Hasher(memory_cost=65536, time_cost=3, parallelism=1).hash(password)
+    assert passwords.verify_password(password, legacy)
+    with pytest.raises(ValueError):
+        passwords.hash_password(password)
+
+
+@pytest.mark.parametrize("password", ["x" * 129, "x" * 14 + "\ud800"])
+def test_verify_rejects_invalid_input_before_argon2(
+    monkeypatch: pytest.MonkeyPatch, password: str
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> bool:
+        pytest.fail("Invalid input reached Argon2")
+
+    monkeypatch.setattr(passwords._password_hash, "verify", forbidden)
+    assert not passwords.verify_password(password, DUMMY_PASSWORD_HASH)

@@ -13,6 +13,8 @@ jobs:
     env:
       APP_ENV: ci
       DEBUG: "false"
+      # Valeur fictive, exclusivement destinée aux tests éphémères.
+      JWT_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
       DATABASE_URL: postgresql+asyncpg://securevault:ci_dev_only@127.0.0.1:5432/securevault
       REDIS_URL: redis://127.0.0.1:6379/0
     services:
