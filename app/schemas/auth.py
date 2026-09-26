@@ -59,7 +59,14 @@ class LoginRequest(BaseModel):
         return canonicalize_email(value)
 
 
-class TokenResponse(BaseModel):
+class RefreshTokenRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True, frozen=True)
+
+    refresh_token: Annotated[SecretStr, Field(strict=True, max_length=256)]
+
+
+class TokenPairResponse(BaseModel):
     access_token: str = Field(repr=False)
+    refresh_token: str = Field(repr=False)
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
