@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 SENSITIVE_VALIDATION_MESSAGES = {
     "password": "Invalid password.",
     "refresh_token": "Invalid refresh token.",
+    "content": "Invalid secret content.",
 }
 
 

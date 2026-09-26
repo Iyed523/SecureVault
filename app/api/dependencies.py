@@ -31,3 +31,13 @@ async def get_current_user(
             detail="Invalid credentials.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+
+
+async def get_secret_session(
+    current_user: Annotated[PublicUser, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AsyncSession:
+    # get_current_user effectue uniquement des lectures. Libérer cette transaction
+    # avant les use cases Secret, qui contrôlent leurs propres transactions.
+    await session.rollback()
+    return session

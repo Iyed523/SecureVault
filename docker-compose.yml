@@ -9,6 +9,8 @@ services:
       DEBUG: "false"
       LOG_LEVEL: INFO
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to 64 hexadecimal characters}
+      SECRETS_ENCRYPTION_KEYS: ${SECRETS_ENCRYPTION_KEYS:?Set SECRETS_ENCRYPTION_KEYS to a JSON keyring}
+      SECRETS_ACTIVE_KEY_VERSION: ${SECRETS_ACTIVE_KEY_VERSION:-1}
       DATABASE_URL: postgresql+asyncpg://securevault:local_dev_only@postgres:5432/securevault
       REDIS_URL: redis://redis:6379/0
     ports:
