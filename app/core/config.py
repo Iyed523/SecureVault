@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     ] = Field(repr=False)
     redis_url: RedisDsn = Field(repr=False)
     jwt_secret: SecretStr = Field(repr=False)
+    rate_limit_secret: SecretStr = Field(repr=False)
+    rate_limit_window_seconds: int = Field(default=60, gt=0, le=86400)
+    login_rate_limit_per_ip: int = Field(default=20, gt=0, le=100000)
+    login_rate_limit_per_account: int = Field(default=5, gt=0, le=100000)
+    register_rate_limit_per_ip: int = Field(default=10, gt=0, le=100000)
     secrets_encryption_keys: SecretStr = Field(repr=False)
     secrets_active_key_version: int = Field(default=1, ge=1, le=MAX_KEY_VERSION)
     access_token_ttl_minutes: int = Field(default=15, gt=0)
@@ -77,6 +82,31 @@ class Settings(BaseSettings):
 
     def jwt_signing_key(self) -> bytes:
         return bytes.fromhex(self.jwt_secret.get_secret_value())
+
+    @field_validator("rate_limit_secret")
+    @classmethod
+    def validate_rate_limit_secret(cls, value: SecretStr) -> SecretStr:
+        if re.fullmatch(r"[0-9a-fA-F]{64}", value.get_secret_value()) is None:
+            raise ValueError(
+                "RATE_LIMIT_SECRET must contain exactly 64 hexadecimal characters."
+            )
+        return value
+
+    def rate_limit_hmac_key(self) -> bytes:
+        return bytes.fromhex(self.rate_limit_secret.get_secret_value())
+
+    @field_validator(
+        "rate_limit_window_seconds",
+        "login_rate_limit_per_ip",
+        "login_rate_limit_per_account",
+        "register_rate_limit_per_ip",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_rate_limit(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("Rate limit parameters must be integers, not booleans.")
+        return value
 
     @field_validator("secrets_encryption_keys")
     @classmethod

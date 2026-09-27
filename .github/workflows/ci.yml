@@ -17,6 +17,10 @@ jobs:
       JWT_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
       SECRETS_ENCRYPTION_KEYS: '{"1":"abababababababababababababababababababababababababababababababab"}'
       SECRETS_ACTIVE_KEY_VERSION: "1"
+      RATE_LIMIT_SECRET: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+      LOGIN_RATE_LIMIT_PER_IP: "100000"
+      LOGIN_RATE_LIMIT_PER_ACCOUNT: "100000"
+      REGISTER_RATE_LIMIT_PER_IP: "100000"
       DATABASE_URL: postgresql+asyncpg://securevault:ci_dev_only@127.0.0.1:5432/securevault
       REDIS_URL: redis://127.0.0.1:6379/0
     services:

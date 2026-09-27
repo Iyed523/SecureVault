@@ -21,7 +21,8 @@ python -m pip install -c constraints-runtime.txt -e ".[dev]"
 
 Sous Linux/macOS : `python3.13 -m venv .venv`, puis `source .venv/bin/activate`.
 
-`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET` et `SECRETS_ENCRYPTION_KEYS` sont obligatoires. Avant de démarrer l'API, Alembic
+`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `RATE_LIMIT_SECRET` et
+`SECRETS_ENCRYPTION_KEYS` sont obligatoires. Avant de démarrer l'API, Alembic
 ou Pytest localement, fournir ces variables dans l'environnement ou copier
 `.env.example` vers `.env` (valeurs fictives de développement). Ne pas écraser un
 `.env` existant. Les variables d'environnement sont prioritaires sur `.env`,
@@ -31,7 +32,8 @@ lu depuis le répertoire courant. `DEBUG=false` par défaut ; `LOG_LEVEL` accept
 `DATABASE_URL` utilise `postgresql+asyncpg://` ; `REDIS_URL` utilise `redis://`
 ou `rediss://`. Les URLs de `.env.example` ciblent l'hôte. Compose fournit
 explicitement ses propres URLs utilisant les noms `postgres` et `redis` ;
-`JWT_SECRET`, `SECRETS_ENCRYPTION_KEYS` et `SECRETS_ACTIVE_KEY_VERSION` sont repris
+`JWT_SECRET`, `RATE_LIMIT_SECRET`, `SECRETS_ENCRYPTION_KEYS` et
+`SECRETS_ACTIVE_KEY_VERSION` sont repris
 explicitement de l'environnement ou du `.env` local pour l'API conteneurisée.
 
 Générer une clé JWT locale avec une source cryptographique :
@@ -98,7 +100,7 @@ Lancer seulement l'infrastructure, puis l'API avec `.venv` activé :
 
 ```powershell
  docker compose up -d --wait postgres redis
- python -m uvicorn app.main:app --reload --host 127.0.0.1 --no-access-log
+ python -m uvicorn app.main:app --reload --host 127.0.0.1 --no-access-log --no-proxy-headers
 ```
 
 Arrêter auparavant l'API Compose si elle occupe le port 8000 :
@@ -170,6 +172,75 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
 
 Les choix CRUD et recherche sont détaillés dans
 [ADR 0007](docs/adr/0007-secret-crud-search.md).
+
+## Limitation des tentatives d'authentification
+
+`POST /auth/login` et `POST /auth/register` utilisent le client Redis partagé
+pour une sliding window log atomique : Sorted Set, script Lua et temps serveur
+Redis (`TIME`). Les quotas sont communs aux instances API partageant Redis,
+le secret HMAC et la même configuration ; aucun compteur process-local.
+
+| Variable | Défaut | Bornes |
+| --- | --- | --- |
+| `RATE_LIMIT_WINDOW_SECONDS` | 60 | 1–86400 secondes |
+| `LOGIN_RATE_LIMIT_PER_IP` | 20 | 1–100000 |
+| `LOGIN_RATE_LIMIT_PER_ACCOUNT` | 5 | 1–100000 |
+| `REGISTER_RATE_LIMIT_PER_IP` | 10 | 1–100000 |
+
+Les paramètres doivent être entiers ; les booléens sont refusés.
+`RATE_LIMIT_SECRET` est obligatoire : générer **séparément** 32 octets avec
+`python -c "import secrets; print(secrets.token_hex(32))"` dans un terminal privé.
+Placer les 64 caractères hexadécimaux dans l'environnement ou le `.env` ignoré.
+Ne pas réutiliser JWT_SECRET ni une clé AES. Le placeholder vide est invalide,
+et Compose exige sa présence. Une rotation de ce secret change les buckets ;
+les anciens expirent, mais les quotas repartent sur de nouvelles clés.
+
+Le login vérifie l'IP avant l'email canonique du `LoginRequest`. Une IP refusée
+ne crée aucun bucket account. Si l'IP passe mais le compte refuse, la tentative
+IP reste comptée. L'inscription utilise uniquement l'IP. Toutes les tentatives
+syntaxiquement valides arrivées dans la route comptent : succès, mauvais mot de
+passe, compte absent/inactif et doublon d'inscription. Aucun reset au succès.
+Les entrées rejetées par validation FastAPI ne sont pas comptées.
+
+Un quota atteint retourne 429 `{"detail":"Too many requests."}` et
+`Retry-After`, entier positif arrondi vers le haut depuis l'expiration de la
+plus ancienne tentative encore dans la fenêtre (minimum 1 seconde). Un refus
+n'ajoute pas de membre ni ne renouvelle le TTL. Une panne Redis retourne 503
+`{"detail":"Service temporarily unavailable."}` : fail closed avant Argon2,
+inscription et création de Session/RefreshToken. Les erreurs de programmation
+ne sont pas masquées. `/ready` continue sa vérification Redis existante.
+
+Les clés `securevault:ratelimit:v1:<bucket>:<hmac_hex>` utilisent HMAC-SHA256
+sur `bucket + NUL + identifiant UTF-8`, avec le secret dédié. Ni email ni IP
+bruts dans Redis : les membres sont des valeurs aléatoires indépendantes de
+16 octets, les scores des timestamps millisecondes, et chaque bucket a un TTL.
+Cette pseudonymisation ne supprime pas la corrélation dans une même fenêtre.
+Le secret utilise SecretStr, est absent des représentations en clair et des
+logs. Comme les autres secrets Pydantic, les données structurées de
+`ValidationError.errors()/json()` peuvent contenir les entrées : ne pas les
+journaliser. Aucune garantie d'effacement mémoire n'est revendiquée.
+
+L'IP vient exclusivement de `request.client.host` ; sans client, tous partagent
+`unknown`. Les headers Forwarded, X-Forwarded-For et X-Real-IP ne sont pas
+interprétés. Les commandes Uvicorn fournies désactivent aussi leur traitement
+avec `--no-proxy-headers` : conserver cette option tant qu'aucune politique
+trusted proxy n'est définie. Derrière un proxy, son adresse peut devenir celle
+du bucket ; NAT/proxy partagé peut donc pénaliser plusieurs utilisateurs.
+Un botnet distribué n'est pas arrêté par le seul quota IP : le quota account
+ajoute une seconde barrière, mais permet aussi à un attaquant de limiter
+temporairement un compte ciblé. La fenêtre par défaut de 60 s borne cet effet
+après l'arrêt des tentatives ; des tentatives continues peuvent le prolonger.
+Ce dispositif n'est pas une protection DDoS complète.
+
+Refresh reste volontairement sans limite : un 429 avant le service pourrait
+retarder l'observation d'un replay et la révocation immédiate de sa famille.
+Logout reste disponible pour révoquer les sessions même en panne Redis.
+`/users/me` et `/secrets` ne sont pas limités. Aucun lockout persistant ni
+changement PostgreSQL. Voir [ADR 0008](docs/adr/0008-auth-rate-limiting.md).
+
+La configuration globale de test utilise des quotas de 100000 et un secret
+public fictif ; les tests Phase 9 utilisent de petits quotas isolés. Les tests
+Redis ne font pas de FLUSHDB : ils nettoient uniquement leurs propres clés.
 
 ## Alembic
 

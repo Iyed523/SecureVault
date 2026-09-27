@@ -168,3 +168,75 @@ def test_max_key_version(infrastructure_config: dict[str, str]) -> None:
         2147483647,
         bytes.fromhex("ab" * 32),
     )
+
+
+def test_rate_limit_secret_required(
+    monkeypatch: pytest.MonkeyPatch, infrastructure_config: dict[str, str]
+) -> None:
+    monkeypatch.delenv("RATE_LIMIT_SECRET", raising=False)
+    with pytest.raises(ValidationError, match="Field required"):
+        Settings(_env_file=None, **infrastructure_config)
+
+
+@pytest.mark.parametrize("secret", ["", "a" * 63, "a" * 65, "g" * 64])
+def test_rate_limit_secret_invalid(
+    infrastructure_config: dict[str, str], secret: str
+) -> None:
+    with pytest.raises(ValidationError) as caught:
+        Settings(_env_file=None, rate_limit_secret=secret, **infrastructure_config)
+    if secret:
+        assert secret not in str(caught.value)
+
+
+def test_rate_limit_secret_hidden(infrastructure_config: dict[str, str]) -> None:
+    secret = "C2" * 32
+    settings = Settings(
+        _env_file=None, rate_limit_secret=secret, **infrastructure_config
+    )
+    assert settings.rate_limit_hmac_key() == bytes.fromhex(secret)
+    assert len(settings.rate_limit_hmac_key()) == 32
+    for value in (repr(settings), str(settings), settings.model_dump_json()):
+        assert secret not in value
+
+
+@pytest.mark.parametrize(
+    ("name", "maximum"),
+    [
+        ("rate_limit_window_seconds", 86400),
+        ("login_rate_limit_per_ip", 100000),
+        ("login_rate_limit_per_account", 100000),
+        ("register_rate_limit_per_ip", 100000),
+    ],
+)
+@pytest.mark.parametrize("value", [0, -1, True, False, 1.5, "over"])
+def test_rate_limit_bounds(
+    infrastructure_config: dict[str, str], name: str, maximum: int, value: object
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            **infrastructure_config,
+            **{name: maximum + 1 if value == "over" else value},
+        )
+
+
+def test_rate_limit_defaults_and_valid_bounds(
+    monkeypatch: pytest.MonkeyPatch, infrastructure_config: dict[str, str]
+) -> None:
+    names = [
+        "rate_limit_window_seconds",
+        "login_rate_limit_per_ip",
+        "login_rate_limit_per_account",
+        "register_rate_limit_per_ip",
+    ]
+    for name in names:
+        monkeypatch.delenv(name.upper(), raising=False)
+    settings = Settings(_env_file=None, **infrastructure_config)
+    assert [getattr(settings, name) for name in names] == [60, 20, 5, 10]
+    for values in ([1, 1, 1, 1], [86400, 100000, 100000, 100000]):
+        settings = Settings(
+            _env_file=None,
+            **infrastructure_config,
+            **dict(zip(names, values, strict=True)),
+        )
+        assert [getattr(settings, name) for name in names] == values
