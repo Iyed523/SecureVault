@@ -145,7 +145,31 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
   500 `Secret content unavailable.`. Le contenu est chiffré en base avec
   AES-256-GCM ; titre, propriétaire, identifiants, dates, versions et longueur
   restent visibles. La réponse autorisée contient le contenu en clair : TLS
-  est nécessaire en déploiement. Aucune route de liste, modification ou suppression.
+  est nécessaire en déploiement.
+- `GET /secrets` : collection du propriétaire, metadata seulement (`id`, `title`,
+  `created_at`, `updated_at`), sans déchiffrement. Réponse `items`, `limit`, `offset`,
+  `has_more`, sans total. `limit` vaut 20 par défaut (1–100), `offset` vaut 0
+  (0–9223372036854775807, borne technique PostgreSQL). Ordre `created_at DESC,
+  id DESC`. Les pages peuvent se déplacer, omettre ou répéter un item si des
+  écritures interviennent entre deux requêtes.
+  `q` facultatif recherche une sous-chaîne dans le titre uniquement, sans strip
+  ni normalisation, avec `ILIKE` selon la collation PostgreSQL ; `%`, `_` et `\`
+  sont littéraux. `q` contient 1–200 caractères, non exclusivement blancs,
+  UTF-8 valide et sans U+0000. Aucune recherche dans le contenu chiffré.
+- `PATCH /secrets/{id}` : `title` et/ou `content`, au moins un champ, sans `null`
+  ni champ supplémentaire. Réponse 200 contenant uniquement les quatre champs
+  de metadata. Une modification du titre ne chiffre ni ne déchiffre le contenu.
+  Fournir `content`, même identique, chiffre avec un nouveau nonce et la clé
+  active, en conservant l'identifiant et la construction AAD. C'est uniquement
+  cette opération qui peut faire passer un ancien secret à la nouvelle clé.
+  Un tiers ou un identifiant absent retourne 404 `Secret not found.`.
+  Une collision nonce/clé retourne 500 `Secret could not be stored.` après rollback.
+- `DELETE /secrets/{id}` : propriétaire, 204 avec body vide. Un tiers, un secret
+  absent ou déjà supprimé retourne le même 404 `Secret not found.`. La suppression
+  SQL ne garantit pas l'effacement physique immédiat dans WAL, backups ou snapshots.
+
+Les choix CRUD et recherche sont détaillés dans
+[ADR 0007](docs/adr/0007-secret-crud-search.md).
 
 ## Alembic
 
