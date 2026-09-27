@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_settings
+from app.api.rate_limit import client_identifier, enforce_rate_limit, get_rate_limiter
 from app.core.config import Settings
 from app.db.session import get_session
 from app.schemas.auth import (
@@ -13,6 +14,7 @@ from app.schemas.auth import (
     TokenPairResponse,
 )
 from app.schemas.user import PublicUser
+from app.security.rate_limit import RateLimiter
 from app.services.login import InvalidCredentials, login_user
 from app.services.logout import logout_session
 from app.services.refresh import InvalidRefreshToken, refresh_tokens
@@ -26,8 +28,18 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 )
 async def register(
     request: RegistrationRequest,
+    http_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
 ) -> PublicUser:
+    await enforce_rate_limit(
+        limiter,
+        "register-ip",
+        client_identifier(http_request),
+        settings.register_rate_limit_per_ip,
+        settings.rate_limit_window_seconds,
+    )
     try:
         return await register_user(request, session)
     except EmailAlreadyRegistered:
@@ -40,9 +52,25 @@ async def register(
 @router.post("/login", response_model=TokenPairResponse)
 async def login(
     request: LoginRequest,
+    http_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
 ) -> TokenPairResponse:
+    await enforce_rate_limit(
+        limiter,
+        "login-ip",
+        client_identifier(http_request),
+        settings.login_rate_limit_per_ip,
+        settings.rate_limit_window_seconds,
+    )
+    await enforce_rate_limit(
+        limiter,
+        "login-account",
+        request.email,
+        settings.login_rate_limit_per_account,
+        settings.rate_limit_window_seconds,
+    )
     try:
         return await login_user(request, session, settings)
     except InvalidCredentials:
