@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.errors import validation_error_handler
+from app.api.middleware import HTTPObservabilityMiddleware
 from app.api.router import router
 from app.core.config import Settings
 from app.core.logging import configure_logging
@@ -43,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=settings.app_name, debug=settings.debug, lifespan=lifespan
     )
     application.state.settings = settings
+    application.add_middleware(HTTPObservabilityMiddleware)
     application.add_exception_handler(RequestValidationError, validation_error_handler)
     application.include_router(router)
     return application

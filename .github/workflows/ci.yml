@@ -7,9 +7,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       APP_ENV: ci
       DEBUG: "false"
@@ -43,10 +48,10 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
       - name: Install dependencies
@@ -65,3 +70,66 @@ jobs:
         run: |
           python -m alembic current
           python -m alembic check
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Install security tools
+        run: python -m pip install -c constraints-runtime.txt ".[security]"
+      - name: Bandit visibility
+        run: python -m bandit -r app --exit-zero
+      - name: Bandit gate
+        run: python -m bandit -r app --severity-level medium
+      - name: Runtime dependency audit
+        run: python -m pip_audit -r constraints-runtime.txt --no-deps --disable-pip --strict --progress-spinner off
+      - name: Gitleaks full history
+        run: >-
+          docker run --rm
+          --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo,readonly"
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo
+          zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --log-opts=--all --gitleaks-ignore-path=/repo/.gitleaksignore --redact=100 --no-banner
+
+  image-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Build runtime image and archive
+        run: |
+          docker build --pull -t securevault:ci .
+          mkdir -p "$RUNNER_TEMP/trivy/cache"
+          docker save -o "$RUNNER_TEMP/trivy/image.tar" securevault:ci
+      - name: Trivy visibility without exceptions
+        run: |
+          docker run --rm \
+            --mount "type=bind,source=$RUNNER_TEMP/trivy,target=/scan,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/trivy/cache,target=/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image --input /scan/image.tar --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 0 --format json --no-progress \
+            > "$RUNNER_TEMP/trivy/visibility.json"
+          python scripts/check_trivy_report.py "$RUNNER_TEMP/trivy/visibility.json"
+      - name: Trivy gate with native expiring exceptions
+        run: |
+          docker run --rm \
+            --mount "type=bind,source=$RUNNER_TEMP/trivy,target=/scan,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/trivy/cache,target=/root/.cache/trivy" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.trivyignore.yaml,target=/policy/.trivyignore.yaml,readonly" \
+            "$TRIVY_IMAGE" image --input /scan/image.tar --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress --skip-db-update \
+            --ignorefile /policy/.trivyignore.yaml

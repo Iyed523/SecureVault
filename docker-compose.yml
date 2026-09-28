@@ -3,6 +3,11 @@ name: securevault
 services:
   api:
     build: .
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       APP_NAME: SecureVault
       APP_ENV: development
