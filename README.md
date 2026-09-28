@@ -107,6 +107,47 @@ Arrêter auparavant l'API Compose si elle occupe le port 8000 :
 `docker compose stop api`.
 `LOG_LEVEL` contrôle le logging applicatif ; Uvicorn utilise `--log-level`.
 
+## Observabilité et sécurité CI
+
+Chaque requête reçoit un `X-Request-ID` serveur (UUID v4 hex, 32 caractères) ;
+un identifiant entrant est ignoré. Les réponses traitées portent
+`Cache-Control: no-store` et `X-Content-Type-Options: nosniff`, y compris les
+erreurs métier contrôlées. Les réponses 204 restent vides.
+
+Le logger HTTP `app.http` produit du JSON à champs explicitement autorisés :
+`timestamp`, `level`, `logger`, `event`, `request_id`, `method`, `route`,
+`status_code`, `duration_ms`. Les routes utilisent leur template ; une route
+inconnue vaut `<unmatched>`. Aucun body, query string, header credential, IP,
+email, token ou identifiant de secret concret n'est ajouté à ces logs.
+La durée est monotone et le contexte est restauré après chaque requête.
+Conserver `--no-access-log --no-proxy-headers` dans la commande Uvicorn.
+Les logs d'erreur serveur restent actifs ; ceci n'est pas un audit trail
+immuable et ne garantit pas le contenu de futurs handlers externes.
+
+L'image runtime utilise Python 3.13.15 sur Debian Trixie, UID 10001, sans pip
+après installation des dépendances. Le service API Compose est en lecture
+seule, sans capabilities et avec `no-new-privileges`. Pas de tmpfs nécessaire
+au parcours validé ; PostgreSQL et Redis gardent leur configuration existante.
+
+Installer les outils locaux dans `.venv`, puis exécuter :
+
+```powershell
+python -m pip install -c constraints-runtime.txt -e ".[dev,security]"
+python -m bandit -r app --exit-zero
+python -m bandit -r app --severity-level medium
+python -m pip_audit -r constraints-runtime.txt --no-deps --disable-pip --strict --progress-spinner off
+```
+
+La CI conserve pytest/Ruff et les services réels ; elle ajoute ces gates,
+Gitleaks sur l'historique complet et deux scans Trivy de l'image finale :
+inventaire HIGH/CRITICAL non filtré puis gate avec exceptions exactes expirant
+le 2026-10-31. Toute CRITICAL ou vulnérabilité corrigible bloque avant les
+exceptions. Huit risques OS temporaires restent suivis dans
+[l'ADR 0009](docs/adr/0009-observability-ci-security.md), qui documente aussi
+les trois LOW Bandit et l'unique fingerprint Gitleaks de fixture autorisé.
+L'image n'est pas présentée comme sans vulnérabilité. Dependabot vérifie chaque
+semaine pip, Docker et GitHub Actions, sans auto-merge.
+
 - `GET /health` : liveness, HTTP 200 avec `{"status":"ok"}`, même si les services
   sont indisponibles. Le démarrage ne nécessite pas de connexion aux services.
 - `POST /auth/register` : inscription avec `email` et `password`. Email validé

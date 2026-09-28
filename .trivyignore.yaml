@@ -1,0 +1,50 @@
+# Acceptation temporaire : docs/adr/0009-observability-ci-security.md
+vulnerabilities:
+  - id: CVE-2026-76642
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2026-78408
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2026-78409
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2026-78410
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2026-54369
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2025-69720
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2026-16742
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.
+  - id: CVE-2026-9538
+    expired_at: 2026-10-31
+    statement: >-
+      Debian Trixie stable : aucun paquet corrige disponible dans les depots
+      stables verifies au 2026-09-27. Risque temporairement accepte apres
+      investigation Phase 10. Reevaluation obligatoire avant expiration.

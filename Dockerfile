@@ -1,4 +1,4 @@
-FROM python:3.13.14-slim-bookworm@sha256:67a1e1f215ccda113cfc024e8639049257e88f273898f595b61476d128d387e8
+FROM python:3.13.15-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,7 +10,8 @@ RUN groupadd --gid 10001 securevault \
 
 COPY pyproject.toml README.md constraints-runtime.txt ./
 COPY app ./app
-RUN python -m pip install --no-cache-dir -c constraints-runtime.txt .
+RUN python -m pip install --no-cache-dir -c constraints-runtime.txt . \
+    && python -m pip uninstall --yes pip
 COPY alembic.ini ./
 COPY migrations ./migrations
 

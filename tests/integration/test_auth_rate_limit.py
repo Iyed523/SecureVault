@@ -22,6 +22,7 @@ from app.models import RefreshToken, Session, User
 from app.schemas.auth import LoginRequest
 from app.security.rate_limit import Bucket, bucket_key
 from app.services import login, registration
+from tests.api.test_observability import assert_headers
 from tests.integration.test_login import PASSWORD, seed
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -107,6 +108,7 @@ def forbidden(*args: object, **kwargs: object) -> None:
 
 
 def assert_limited(response: Response) -> None:
+    assert_headers(response)
     assert response.status_code == 429
     assert response.json() == {"detail": "Too many requests."}
     assert response.headers["retry-after"].isdigit()
@@ -201,6 +203,7 @@ async def test_redis_unavailable_is_private_fail_closed(
     before = await counts(db_session)
     response = await env.post(path, f"{uuid4()}@example.com")
     assert response.status_code == 503
+    assert_headers(response)
     assert response.json() == {"detail": "Service temporarily unavailable."}
     assert "PRIVATE-REDIS-ERROR" not in response.text + caplog.text
     assert await counts(db_session) == before
