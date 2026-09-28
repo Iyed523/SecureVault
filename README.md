@@ -1,7 +1,41 @@
 # SecureVault
 
-API REST FastAPI, **en développement**. Le socle inclut PostgreSQL 17,
-SQLAlchemy async, Alembic, Redis 8 et les sondes de disponibilité.
+API REST de coffre de secrets personnel, préparée pour la version portfolio
+**v0.1.0**. Chaque utilisateur gère ses secrets ; leur contenu est chiffré en
+base et leurs accès sont limités au propriétaire. Les titres restent en clair
+pour permettre une recherche et des listes sans déchiffrement.
+
+Le projet illustre une authentification avec sessions révocables, rotation des
+refresh tokens, détection du replay, CRUD chiffré, quotas Redis et observabilité
+minimisée. Il n'est ni certifié, ni audité professionnellement, ni présenté
+comme prêt à être déployé sans analyse de son environnement.
+
+## Architecture et stack
+
+CPython 3.13 standard, FastAPI/Pydantic, SQLAlchemy async/asyncpg, PostgreSQL 17,
+Alembic, Redis 8, Argon2id, PyJWT et AES-256-GCM via cryptography.
+Docker utilise Python 3.13.15 sur Debian Trixie. Les versions runtime exactes
+figurent dans `constraints-runtime.txt`.
+
+| Couche | Responsabilité |
+| --- | --- |
+| `app/api` | HTTP, dépendances d'authentification, quotas et traduction des erreurs |
+| `app/schemas` | Validation des entrées et contrats de réponse explicites |
+| `app/services` | Cas d'usage, transactions, autorisation et révocation |
+| `app/repositories` | Requêtes SQL, filtre propriétaire, flush sans commit |
+| `app/security` | Primitives password/JWT/refresh/AES et quota Redis atomique |
+| `app/models`, `app/db` | Persistance, contraintes et sessions par requête |
+| `app/infrastructure`, `app/core` | Pools, sondes, configuration et logs |
+
+Les pools PostgreSQL/Redis sont créés au lifespan et fermés à l'arrêt. Aucun
+mode métier de test ne remplace les protections en production. Certains tests
+isolent des erreurs par injection ; le parcours de référence Phase 11 utilise
+les dépendances réelles, les commits et le lifespan sans mocks.
+
+Documentation : [threat model](docs/threat-model.md),
+[runbook et rotation AES](docs/operations.md),
+[revue et checklist v0.1.0](docs/release-readiness.md),
+[décisions historiques ADR 0001 à 0009](docs/adr/).
 
 ## Prérequis
 
@@ -76,7 +110,9 @@ Cette phase ne réchiffre pas les données existantes. Voir
 ## Docker Compose
 
 ```powershell
- docker compose up -d --build --wait
+ docker compose up -d --wait postgres redis
+ python -m alembic upgrade head
+ docker compose up -d --build --wait api
  docker compose ps
 ```
 
@@ -147,6 +183,18 @@ exceptions. Huit risques OS temporaires restent suivis dans
 les trois LOW Bandit et l'unique fingerprint Gitleaks de fixture autorisé.
 L'image n'est pas présentée comme sans vulnérabilité. Dependabot vérifie chaque
 semaine pip, Docker et GitHub Actions, sans auto-merge.
+
+## Contrat API
+
+Les bodies et réponses non vides sont JSON. Les routes protégées demandent
+`Authorization: Bearer <access_token_obtenu_localement>`. Les erreurs métier
+contrôlées ont la forme `{"detail":"message public"}` ; la validation 422
+retourne `detail` sous forme de liste `type`/`loc`/`msg`, sans entrée sensible.
+Les réponses n'utilisent pas d'enveloppe commune de succès ; les champs sont
+détaillés ci-dessous. `/docs` et `/openapi.json` exposent les schémas générés.
+OpenAPI décrit les succès et la validation, mais ne répertorie pas toutes les
+erreurs métier ni les headers ajoutés par le middleware : ce contrat complète
+le schéma généré. Son numéro de version par défaut n'est pas un tag Git publié.
 
 - `GET /health` : liveness, HTTP 200 avec `{"status":"ok"}`, même si les services
   sont indisponibles. Le démarrage ne nécessite pas de connexion aux services.
@@ -346,3 +394,19 @@ Les repositories ne valident pas les transactions : leurs méthodes `add` font
 un `flush`, et les services contrôlent commit et rollback. Les tests de rotation
 utilisent aussi des commits réels et une autre connexion pour vérifier la
 persistance des révocations ; ils nettoient uniquement leurs propres utilisateurs.
+
+## Limites et publication
+
+La protection du contenu vise notamment une fuite de la base sans les clés.
+Elle ne protège pas contre un serveur totalement compromis possédant le keyring.
+TLS, isolation réseau, secrets indépendants, sauvegardes chiffrées et gestion
+des accès opérateurs relèvent du déploiement. Le Compose livré est local.
+Pas de MFA, récupération de mot de passe, vérification email, partage, KMS,
+réchiffrement global ou audit trail immuable. Les sessions expirées ne sont pas
+purgées automatiquement. Les huit exceptions Trivy sont temporaires et ne
+constituent pas une absence de vulnérabilités.
+
+GitHub Actions valide tests, lint et sécurité ; aucun déploiement ou publication
+automatique n'est configuré. Toute release nécessite la revue du diff, la CI du
+commit exact et la checklist documentée. La préparation v0.1.0 ne crée ni tag
+ni GitHub Release.
