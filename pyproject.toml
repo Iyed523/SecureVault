@@ -9,7 +9,7 @@ description = "Socle API REST de SecureVault, en développement."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "fastapi==0.141.1",
+    "fastapi==0.142.2",
     "uvicorn==0.54.0",
     "pydantic-settings==2.15.0",
     "SQLAlchemy[asyncio]==2.1.0",
